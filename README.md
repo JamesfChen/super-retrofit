@@ -1,6 +1,6 @@
 Super Retrofit
 ========
-This project fork [Retrofit](https://github.com/square/retrofit),but refactor project.
+This project fork from[Retrofit](https://github.com/square/retrofit),I refactor project to make custom protocol( base TCP) 、volley、UrlConnection support restful api
 
 You can use some call factorys(UrlConnectionCallFactory 、OkHttpCallFactory )) to create call , and add you custom protocol to this project.
 ```java
