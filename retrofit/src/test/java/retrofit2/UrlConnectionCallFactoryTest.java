@@ -1,9 +1,11 @@
 package retrofit2;
 
+import okhttp3.Headers;
 import okhttp3.RequestBody;
 import okhttp3.ResponseBody;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -43,18 +45,21 @@ public class UrlConnectionCallFactoryTest {
         @POST("/{a}")
         Call<String> postRequestBody(@Path("a") Object a);
     }
+
     Service serviceApi;
+
     @Before
-    public void setUp(){
+    public void setUp() {
         Retrofit retrofit =
                 new Retrofit.Builder()
                         .baseUrl(server.url("/"))
                         .addConverterFactory(new ToStringConverterFactory())
                         .callFactory(UrlConnectionCallFactory.create())
                         .build();
-        serviceApi= retrofit.create(Service.class);
+        serviceApi = retrofit.create(Service.class);
 
     }
+
     @Test
     public void http200Sync() throws IOException {
 
@@ -70,9 +75,17 @@ public class UrlConnectionCallFactoryTest {
         int nums = 14;
         new Thread(() -> {
             try {
-                for (int i =0;i<nums;++i){
-                    System.out.println("[ "+i+" server request body]:" + server.takeRequest().getBody().readByteString().toString());
-                    server.enqueue(new MockResponse().setBody(i+" ok post "));
+                for (int i = 0; i < nums; ++i) {
+                    RecordedRequest recordedRequest = server.takeRequest();
+                    Headers headers = recordedRequest.getHeaders();
+                    MockResponse mockResponse = new MockResponse();
+                    System.out.println("[ " + i + " server request headers]:\n"+headers.toString());
+                    System.out.println("[ " + i + " server request body]:\n" + recordedRequest.getBody().readByteString().toString());
+                    for (int j = 0; j < headers.size(); ++j) {
+                        mockResponse.addHeader(headers.name(j), headers.value(j));
+                    }
+                    mockResponse.setBody(i + " ok post ");
+                    server.enqueue(mockResponse);
                 }
             } catch (InterruptedException e) {
                 e.printStackTrace();
@@ -80,10 +93,11 @@ public class UrlConnectionCallFactoryTest {
         }).start();
         try {
 
-            for (int i =0;i<nums;++i){
-                Call<String> call = serviceApi.postString(i+" Hi testPostString ");
-                Response<String> respo =call.execute();
-                System.out.println("[ "+i+" client response body]:" + respo.body());
+            for (int i = 0; i < nums; ++i) {
+                Call<String> call = serviceApi.postString(i + " Hi testPostString ");
+                Response<String> respo = call.execute();
+                System.out.println("[ " + i + " client response headers]:\n" + respo.headers());
+                System.out.println("[ " + i + " client response body]:\n" + respo.body());
                 System.out.println("=================================================");
             }
 
@@ -91,32 +105,33 @@ public class UrlConnectionCallFactoryTest {
             System.out.println("testPostString error");
         }
     }
+
     @Test
     public void testPostStringASync() throws IOException {
         int nums = 14;
         new Thread(() -> {
             try {
-                for (int i =0;i<nums;++i){
-                    System.out.println("[ "+i+" server request body]:" + server.takeRequest().getBody().readByteString().toString());
-                    server.enqueue(new MockResponse().setBody(i+" ok post "));
+                for (int i = 0; i < nums; ++i) {
+                    System.out.println("[ " + i + " server request body]:" + server.takeRequest().getBody().readByteString().toString());
+                    server.enqueue(new MockResponse().setBody(i + " ok post "));
                 }
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }).start();
         try {
-            boolean iscancel=true;
-            for (int i =0;i<nums;++i){
-                Call<String> call = serviceApi.postString(i+" Hi testPostString ");
-                Response<String> respo =call.execute();
-                if (iscancel){
-                    iscancel=false;
+            boolean iscancel = true;
+            for (int i = 0; i < nums; ++i) {
+                Call<String> call = serviceApi.postString(i + " Hi testPostString ");
+                Response<String> respo = call.execute();
+                if (iscancel) {
+                    iscancel = false;
                     Thread.sleep(10);
                     call.cancel();
 
                 }
 
-                System.out.println("[ "+i+" client response body]:" + respo.body());
+                System.out.println("[ " + i + " client response body]:" + respo.body());
                 System.out.println("=================================================");
             }
 

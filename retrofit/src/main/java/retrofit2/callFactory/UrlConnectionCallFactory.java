@@ -1,24 +1,19 @@
 package retrofit2.callFactory;
 
-import okhttp3.Headers;
-import okhttp3.MediaType;
+import okhttp3.*;
 import okhttp3.internal.http2.Header;
 import okio.*;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.ProtocolException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import okhttp3.Request;
-import okhttp3.ResponseBody;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Converter;
@@ -78,16 +73,16 @@ public final class UrlConnectionCallFactory implements Call.Factory {
         private Request request;
         private HttpURLConnection rawConnection;
         private Converter<ResponseBody, T> responseConverter;
-        @GuardedBy("this")
         private boolean executed;
         private volatile boolean canceled;
 
-         UrlConnectionCall(
+        UrlConnectionCall(
                 Request request,
                 Converter<ResponseBody, T> responseConverter) {
             this.request = request;
             this.responseConverter = responseConverter;
         }
+
         private HttpURLConnection createConnection() throws IOException {
             HttpURLConnection connection;
 
@@ -96,21 +91,17 @@ public final class UrlConnectionCallFactory implements Call.Factory {
             } else {
                 connection = (HttpURLConnection) request.url().url().openConnection();
             }
-                String method = request.method();
-                connection.setRequestMethod(method);
-                for (int i = 0, size = request.headers().size(); i < size; ++i) {
-                    String name = request.headers().name(i);
-                    String value = request.headers().value(i);
-                    connection.addRequestProperty(name, value);
-                }
-                if ("GET".equals(method)) {
-                    connection.setDoInput(true);
-                    connection.setInstanceFollowRedirects(false);
-                } else if ("POST".equals(method)) {
-                    connection.setDoOutput(true);
-                    connection.setUseCaches(false);
-
-                }
+            return connection;
+        }
+        private void configConnection(HttpURLConnection connection) throws ProtocolException {
+            for (int i = 0, size = request.headers().size(); i < size; ++i) {
+                String name = request.headers().name(i);
+                String value = request.headers().value(i);
+                connection.addRequestProperty(name, value);
+            }
+            String method = request.method();
+            connection.setRequestMethod(method);
+            connection.setDoInput(true);
 //                connection.setConnectTimeout(timeout);
 //                connection.setReadTimeout(timeout);
 //                connection.setHostnameVerifier();
@@ -121,8 +112,8 @@ public final class UrlConnectionCallFactory implements Call.Factory {
 //                connection.setFixedLengthStreamingMode();
 //                connection.setIfModifiedSince();
             rawConnection = connection;
-            return  connection;
         }
+
         @Override
         public Response<T> execute() throws IOException {
             HttpURLConnection connection;
@@ -137,25 +128,50 @@ public final class UrlConnectionCallFactory implements Call.Factory {
             }
 
             try {
-                connection.connect();
-                OutputStream outputStream = connection.getOutputStream();
-                Buffer buffer = new Buffer();
-                assert request.body() != null;
-                request.body().writeTo(buffer);
-                outputStream.write(buffer.readByteArray());
-                outputStream.flush();
-                outputStream.close();
+                int i = 0;
+                while (true) {
+                    try {
+                        synchronized (this) {
+                            connection = createConnection();
 
+                        }
+                        if (i <= 0) {
+                            break;
+                        }
+                        connection.setRequestProperty("Collection", "close");
+                        break;
+                    } catch (EOFException e) {
+                        i++;
+                        connection.disconnect();
+                    }
+                }
+                configConnection(connection);
+                RequestBody rawbody = request.body();
+                if (rawbody != null) {
+                    connection.setDoOutput(true);
+                    connection.addRequestProperty("Content-Type", rawbody.contentType().type());
+                    long contentLegth = rawbody.contentLength();
+                    if (contentLegth != -1) {
+                        connection.setFixedLengthStreamingMode((int) contentLegth);
+                        connection.addRequestProperty("Content-Length", String.valueOf(contentLegth));
+                    } else {
+                        connection.setChunkedStreamingMode(4096);
+                    }
+//                    body.writeTo(connection.getOutputStream())
+                    Buffer buffer = new Buffer();
+                    OutputStream outputStream = connection.getOutputStream();
+                    rawbody.writeTo(buffer);
+                    outputStream.write(buffer.readByteArray());
+                    outputStream.flush();
+                    outputStream.close();
+                }
                 InputStream inputStream = connection.getInputStream();
                 byte[] rawResponseBody = readInputStream(inputStream);
                 int responseCode = connection.getResponseCode();
-                for (Map.Entry<String, List<String>> entry:connection.getHeaderFields().entrySet()) {
-                    System.out.println(entry.getKey() + ":"+ entry.getValue());
-                }
-                if (responseCode ==200){
-                    String contentLength = connection.getHeaderField("Content-Length");
-                    String contentType = connection.getHeaderField("Content-Type");
-                    contentType= "application/json; charset=UTF-8";
+                if (responseCode == 200) {
+//                    int contentLength = connection.getContentLength();
+//                    String responseMessage = connection.getResponseMessage();
+                    String contentType = connection.getContentType();
                     ResponseBody responseBody = ResponseBody.create(MediaType.parse(contentType), rawResponseBody);
                     OkHttpCallFactory.OkHttpCall.ExceptionCatchingResponseBody catchingBody = new OkHttpCallFactory.OkHttpCall.ExceptionCatchingResponseBody(responseBody);
                     try {
@@ -219,7 +235,7 @@ public final class UrlConnectionCallFactory implements Call.Factory {
 
         @Override
         public boolean isCanceled() {
-                return canceled;
+            return canceled;
         }
 
         @Override
